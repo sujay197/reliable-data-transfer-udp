@@ -1,0 +1,15 @@
+# Build files
+*.o
+*.out
+*.exe
+
+# IDE
+.vscode/
+.idea/
+
+# Generated results
+results/generated/
+
+# Temporary files
+*.tmp
+*.log
