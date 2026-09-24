@@ -3,6 +3,12 @@
 *.out
 *.exe
 
+# Compiled executables
+build/
+
+# Windows system files
+desktop.ini
+
 # IDE
 .vscode/
 .idea/
