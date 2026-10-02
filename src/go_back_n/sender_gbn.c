@@ -1,3 +1,10 @@
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 int main()
 {
     int sockfd;
@@ -24,6 +31,58 @@ int main()
     printf("Window size: %d\n", window_size);
     printf("Base: %d\n", base);
     printf("Next sequence number: %d\n", next_seq_num);
+    char packet[250];
+
+while (next_seq_num < base + window_size)
+{
+    sprintf(packet, "SEQ=%d|DATA=Packet%d",
+            next_seq_num, next_seq_num);
+
+    printf("Sending: %s\n", packet);
+
+    sendto(sockfd, packet, strlen(packet), 0,
+           (struct sockaddr *)&sa, sizeof(sa));
+
+    next_seq_num++;
+}
+/* Receive ACKs */
+while (base < next_seq_num)
+{
+    char ack[100];
+    int ack_num;
+
+    int n = recvfrom(sockfd, ack, sizeof(ack) - 1, 0,
+                     NULL, NULL);
+
+    if (n < 0)
+    {
+        perror("recvfrom");
+        break;
+    }
+
+    ack[n] = '\0';
+
+    printf("Received: %s\n", ack);
+
+    if (sscanf(ack, "ACK=%d", &ack_num) == 1)
+    {
+        if (ack_num >= base)
+        {
+            base = ack_num + 1;
+
+            printf("ACK accepted: %d\n", ack_num);
+            printf("Updated base: %d\n", base);
+        }
+        else
+        {
+            printf("Duplicate/old ACK: %d\n", ack_num);
+        }
+    }
+}
+
+printf("Window transmission complete.\n");
+printf("Base: %d\n", base);
+printf("Next sequence number: %d\n", next_seq_num);
 
     close(sockfd);
 
