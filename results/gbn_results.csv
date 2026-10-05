@@ -1,0 +1,5 @@
+Experiment,Packet_Loss_Percent,ACK_Loss_Percent,Timeouts,Successful
+E1,0,0,0,Yes
+E2,25,0,1,Yes
+E3,0,25,0,Yes
+E4,25,25,3,Yes

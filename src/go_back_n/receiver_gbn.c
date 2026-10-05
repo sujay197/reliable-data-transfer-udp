@@ -3,28 +3,23 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
-
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #define PORT 6025
-
 #define PACKET_SIZE 250
 #define ACK_SIZE 250
 
-#define PACKET_LOSS_PROBABILITY 25
-#define ACK_LOSS_PROBABILITY 25
+#define DEFAULT_PACKET_LOSS_PROBABILITY 25
+#define DEFAULT_ACK_LOSS_PROBABILITY 25
 
-int main()
+int main(int argc, char *argv[])
 {
     int sockfd;
-
     struct sockaddr_in sa;
     struct sockaddr_in ca;
-
     socklen_t ca_len;
 
     char packet[PACKET_SIZE];
@@ -33,18 +28,53 @@ int main()
     int expected_seq = 0;
     int seq;
 
+    int packet_loss_probability =
+        DEFAULT_PACKET_LOSS_PROBABILITY;
+
+    int ack_loss_probability =
+        DEFAULT_ACK_LOSS_PROBABILITY;
+
+    /*
+     * Optional command-line arguments:
+     *
+     * ./receiver_gbn <packet_loss_%> <ack_loss_%>
+     *
+     * Example:
+     *
+     * ./receiver_gbn 0 0
+     * ./receiver_gbn 25 0
+     * ./receiver_gbn 0 25
+     * ./receiver_gbn 25 25
+     */
+    if (argc >= 2)
+    {
+        packet_loss_probability = atoi(argv[1]);
+    }
+
+    if (argc >= 3)
+    {
+        ack_loss_probability = atoi(argv[2]);
+    }
+
+    /*
+     * Validate loss probabilities.
+     */
+    if (packet_loss_probability < 0 ||
+        packet_loss_probability > 100 ||
+        ack_loss_probability < 0 ||
+        ack_loss_probability > 100)
+    {
+        printf("Error: loss probabilities must be between 0 and 100.\n");
+        return 1;
+    }
+
     /*
      * Seed random number generator.
-     *
-     * This makes packet/ACK loss different on
-     * different executions.
      */
     srand((unsigned int)time(NULL));
 
     /*
-     * ------------------------------------------------
-     * Create UDP socket
-     * ------------------------------------------------
+     * Create UDP socket.
      */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -55,8 +85,7 @@ int main()
     }
 
     /*
-     * Allow quick reuse of the port after
-     * stopping and restarting the receiver.
+     * Allow immediate reuse of the port.
      */
     int reuse = 1;
 
@@ -72,9 +101,7 @@ int main()
     }
 
     /*
-     * ------------------------------------------------
-     * Configure receiver address
-     * ------------------------------------------------
+     * Configure server address.
      */
     memset(&sa, 0, sizeof(sa));
 
@@ -83,9 +110,7 @@ int main()
     sa.sin_port = htons(PORT);
 
     /*
-     * ------------------------------------------------
-     * Bind socket
-     * ------------------------------------------------
+     * Bind socket to port 6025.
      */
     if (bind(sockfd,
              (struct sockaddr *)&sa,
@@ -97,23 +122,19 @@ int main()
     }
 
     /*
-     * ------------------------------------------------
-     * Startup information
-     * ------------------------------------------------
+     * Startup information.
      */
     printf("=====================================\n");
     printf("      Go-Back-N Receiver Started\n");
     printf("=====================================\n");
     printf("Listening on port: %d\n", PORT);
     printf("Packet loss probability: %d%%\n",
-           PACKET_LOSS_PROBABILITY);
+           packet_loss_probability);
     printf("ACK loss probability: %d%%\n\n",
-           ACK_LOSS_PROBABILITY);
+           ack_loss_probability);
 
     /*
-     * ------------------------------------------------
-     * Main receive loop
-     * ------------------------------------------------
+     * Receive packets continuously.
      */
     while (1)
     {
@@ -122,17 +143,13 @@ int main()
 
         ca_len = sizeof(ca);
 
-        /*
-         * ------------------------------------------------
-         * Receive packet
-         * ------------------------------------------------
-         */
-        ssize_t received = recvfrom(sockfd,
-                                    packet,
-                                    sizeof(packet) - 1,
-                                    0,
-                                    (struct sockaddr *)&ca,
-                                    &ca_len);
+        ssize_t received =
+            recvfrom(sockfd,
+                     packet,
+                     sizeof(packet) - 1,
+                     0,
+                     (struct sockaddr *)&ca,
+                     &ca_len);
 
         if (received < 0)
         {
@@ -145,13 +162,12 @@ int main()
         printf("Received: %s\n", packet);
 
         /*
-         * ------------------------------------------------
-         * Parse sequence number
-         * ------------------------------------------------
+         * Extract sequence number.
          */
         if (sscanf(packet, "SEQ=%d", &seq) != 1)
         {
-            printf("Invalid packet received: %s\n\n", packet);
+            printf("Invalid packet received: %s\n\n",
+                   packet);
             continue;
         }
 
@@ -160,17 +176,11 @@ int main()
                expected_seq);
 
         /*
-         * =================================================
-         * SIMULATED PACKET LOSS
-         * =================================================
-         *
-         * Randomly discard some incoming packets.
-         *
-         * No ACK is sent when a packet is discarded.
+         * Simulate packet loss.
          */
         int packet_loss = rand() % 100;
 
-        if (packet_loss < PACKET_LOSS_PROBABILITY)
+        if (packet_loss < packet_loss_probability)
         {
             printf("\n*** SIMULATED PACKET LOSS ***\n");
             printf("Packet discarded: %s\n", packet);
@@ -180,22 +190,19 @@ int main()
         }
 
         /*
-         * =================================================
-         * EXPECTED PACKET
-         * =================================================
+         * Correct packet.
          */
         if (seq == expected_seq)
         {
             printf("Packet accepted: SEQ=%d\n", seq);
 
             /*
-             * Move receiver's expected sequence number.
+             * Advance receiver's expected sequence number.
              */
             expected_seq++;
 
             /*
-             * Cumulative ACK acknowledges the
-             * packet that was just correctly received.
+             * Generate cumulative ACK.
              */
             snprintf(ack,
                      sizeof(ack),
@@ -206,18 +213,11 @@ int main()
                    ack);
 
             /*
-             * =================================================
-             * SIMULATED ACK LOSS
-             * =================================================
-             *
-             * Randomly discard the ACK.
-             *
-             * The sender will not receive this ACK and
-             * will eventually trigger its timeout.
+             * Simulate ACK loss.
              */
             int ack_loss = rand() % 100;
 
-            if (ack_loss < ACK_LOSS_PROBABILITY)
+            if (ack_loss < ack_loss_probability)
             {
                 printf("\n*** SIMULATED ACK LOSS ***\n");
                 printf("ACK discarded: %s\n", ack);
@@ -227,9 +227,7 @@ int main()
             }
 
             /*
-             * ------------------------------------------------
-             * Send ACK
-             * ------------------------------------------------
+             * Send ACK.
              */
             printf("Sending cumulative ACK: %s\n",
                    ack);
@@ -249,26 +247,15 @@ int main()
         }
 
         /*
-         * =================================================
-         * DUPLICATE PACKET
-         * =================================================
-         *
-         * Example:
-         *
-         * expected_seq = 5
-         * received SEQ=4
-         *
-         * Packet 4 was already accepted.
-         *
-         * We resend ACK=4.
+         * Duplicate packet.
          */
         else if (seq < expected_seq)
         {
-            printf("Duplicate packet: SEQ=%d\n",
-                   seq);
+            printf("Duplicate packet: SEQ=%d\n", seq);
 
             /*
-             * The latest correctly received packet is:
+             * The previous correctly received packet
+             * is the latest cumulative ACK.
              */
             int previous_ack = expected_seq - 1;
 
@@ -281,11 +268,11 @@ int main()
                    ack);
 
             /*
-             * Apply ACK loss simulation to duplicate ACKs too.
+             * Simulate loss of duplicate ACK.
              */
             int ack_loss = rand() % 100;
 
-            if (ack_loss < ACK_LOSS_PROBABILITY)
+            if (ack_loss < ack_loss_probability)
             {
                 printf("\n*** SIMULATED ACK LOSS ***\n");
                 printf("Duplicate ACK discarded: %s\n",
@@ -295,6 +282,9 @@ int main()
                 continue;
             }
 
+            /*
+             * Resend previous cumulative ACK.
+             */
             printf("Resending previous ACK: %s\n",
                    ack);
 
@@ -313,20 +303,7 @@ int main()
         }
 
         /*
-         * =================================================
-         * OUT-OF-ORDER PACKET
-         * =================================================
-         *
-         * Example:
-         *
-         * expected_seq = 5
-         * received SEQ=7
-         *
-         * Packet 5 or 6 is missing.
-         *
-         * Go-Back-N receiver does NOT buffer packet 7.
-         * It sends the ACK for the last correctly
-         * received packet.
+         * Out-of-order packet.
          */
         else
         {
@@ -337,8 +314,11 @@ int main()
                    expected_seq);
 
             /*
-             * Send ACK for the last correctly
-             * received packet.
+             * In GBN, receiver does not accept
+             * out-of-order packets.
+             *
+             * Send the most recent cumulative ACK
+             * if one exists.
              */
             if (expected_seq > 0)
             {
@@ -353,15 +333,14 @@ int main()
                        ack);
 
                 /*
-                 * Apply ACK loss simulation.
+                 * Simulate ACK loss.
                  */
                 int ack_loss = rand() % 100;
 
-                if (ack_loss < ACK_LOSS_PROBABILITY)
+                if (ack_loss < ack_loss_probability)
                 {
                     printf("\n*** SIMULATED ACK LOSS ***\n");
-                    printf("ACK discarded: %s\n",
-                           ack);
+                    printf("ACK discarded: %s\n", ack);
                     printf("No ACK sent.\n\n");
 
                     continue;
@@ -380,10 +359,6 @@ int main()
             }
             else
             {
-                /*
-                 * No packet has been correctly received yet,
-                 * so there is no previous ACK to send.
-                 */
                 printf("No previous ACK available.\n");
             }
 
@@ -391,10 +366,6 @@ int main()
         }
     }
 
-    /*
-     * This is normally unreachable because the receiver
-     * continuously waits for packets.
-     */
     close(sockfd);
 
     return 0;
