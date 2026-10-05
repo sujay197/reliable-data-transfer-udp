@@ -18,7 +18,6 @@
 int main()
 {
     int sockfd;
-
     struct sockaddr_in sa;
 
     int base = 0;
@@ -29,9 +28,7 @@ int main()
 
     int ack_num;
 
-    /*
-     * Create UDP socket
-     */
+    /* Create UDP socket */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
     if (sockfd < 0)
@@ -40,21 +37,14 @@ int main()
         return 1;
     }
 
-    /*
-     * Set receiver address
-     */
+    /* Configure receiver address */
     memset(&sa, 0, sizeof(sa));
 
     sa.sin_family = AF_INET;
     sa.sin_addr.s_addr = inet_addr("127.0.0.1");
     sa.sin_port = htons(PORT);
 
-    /*
-     * Set receive timeout.
-     *
-     * If an ACK does not arrive within TIMEOUT_SEC,
-     * recvfrom() returns with an error.
-     */
+    /* Set receive timeout */
     struct timeval timeout;
 
     timeout.tv_sec = TIMEOUT_SEC;
@@ -71,6 +61,7 @@ int main()
         return 1;
     }
 
+    /* Startup information */
     printf("=====================================\n");
     printf("      Go-Back-N Sender Started\n");
     printf("=====================================\n");
@@ -81,14 +72,19 @@ int main()
     printf("Receiver: 127.0.0.1:%d\n\n", PORT);
 
     /*
-     * Main Go-Back-N transmission loop
+     * Continue until every packet has been acknowledged.
+     *
+     * base:
+     *   Oldest unacknowledged packet.
+     *
+     * next_seq_num:
+     *   Next new packet that can be transmitted.
      */
     while (base < TOTAL_PACKETS)
     {
         /*
-         * ------------------------------------------------
-         * STEP 1: Send packets while window has space
-         * ------------------------------------------------
+         * Send new packets while there is space
+         * in the Go-Back-N sliding window.
          */
         while (next_seq_num < base + WINDOW_SIZE &&
                next_seq_num < TOTAL_PACKETS)
@@ -117,9 +113,7 @@ int main()
         }
 
         /*
-         * ------------------------------------------------
-         * STEP 2: Wait for ACK
-         * ------------------------------------------------
+         * Wait for an ACK.
          */
         memset(ack, 0, sizeof(ack));
 
@@ -131,9 +125,7 @@ int main()
                                     NULL);
 
         /*
-         * ------------------------------------------------
-         * STEP 3: Timeout occurred
-         * ------------------------------------------------
+         * No ACK received before timeout.
          */
         if (received < 0)
         {
@@ -144,8 +136,8 @@ int main()
 
             /*
              * Go-Back-N:
-             * retransmit EVERY packet from base
-             * up to next_seq_num - 1.
+             * retransmit every outstanding packet
+             * starting from base.
              */
             for (int i = base; i < next_seq_num; i++)
             {
@@ -171,54 +163,80 @@ int main()
             }
 
             printf("\n");
+
             continue;
         }
 
         /*
-         * Make ACK a proper C string
+         * Convert received ACK into a C string.
          */
         ack[received] = '\0';
 
         printf("Received: %s\n", ack);
 
         /*
-         * ------------------------------------------------
-         * STEP 4: Parse ACK
-         * ------------------------------------------------
+         * Parse ACK.
          */
         if (sscanf(ack, "ACK=%d", &ack_num) == 1)
         {
             printf("ACK number: %d\n", ack_num);
 
             /*
-             * ACK is valid if it acknowledges
-             * something at or beyond the current base.
+             * VALID ACK
              *
-             * Example:
+             * ACK must:
              *
-             * base = 2
-             * ACK=3
+             * 1. Be at or after the current base.
+             * 2. Refer to a packet that has actually
+             *    been sent.
              *
-             * Then packets 2 and 3 are acknowledged.
+             * next_seq_num is one greater than the
+             * highest packet sent.
+             *
+             * Therefore valid ACK numbers are:
+             *
+             *     base <= ACK < next_seq_num
              */
-            if (ack_num >= base)
+            if (ack_num >= base &&
+                ack_num < next_seq_num)
             {
                 base = ack_num + 1;
 
                 printf("ACK accepted: %d\n", ack_num);
                 printf("Updated base: %d\n", base);
             }
+
+            /*
+             * OLD / DUPLICATE ACK
+             */
+            else if (ack_num < base)
+            {
+                printf("Duplicate/old ACK: %d\n", ack_num);
+                printf("Current base remains: %d\n", base);
+            }
+
+            /*
+             * INVALID / FUTURE ACK
+             *
+             * Example:
+             *
+             * base = 0
+             * next_seq_num = 4
+             *
+             * ACK=99 is invalid because packet 99
+             * has never been sent.
+             */
             else
             {
-                /*
-                 * Duplicate/old ACK.
-                 */
-                printf("Duplicate/old ACK: %d\n", ack_num);
+                printf("Invalid/future ACK: %d\n", ack_num);
                 printf("Current base remains: %d\n", base);
             }
         }
         else
         {
+            /*
+             * ACK could not be parsed.
+             */
             printf("Invalid ACK received: %s\n", ack);
         }
 
@@ -226,9 +244,7 @@ int main()
     }
 
     /*
-     * ------------------------------------------------
-     * Transmission completed
-     * ------------------------------------------------
+     * Transmission completed successfully.
      */
     printf("=====================================\n");
     printf("     Transmission Complete\n");
