@@ -1,2 +1,2 @@
 protocol,total_packets,window_size,timeout_ms,simulated_lost_packet,retransmitted_packets,transfer_completed,in_order_delivery,notes
-Selective Repeat,10,4,2000,2,VERIFY,VERIFY,VERIFY,Replace VERIFY fields using actual sender and receiver output
+Selective Repeat,10,4,2000,2,2,Yes,Yes,"Packet 2 retransmitted after simulated loss"
