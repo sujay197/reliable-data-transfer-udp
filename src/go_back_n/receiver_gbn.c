@@ -1,12 +1,20 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#ifdef _WIN32
+#define _WIN32_WINNT 0x0601
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <unistd.h>
-#include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #define PORT 6025
 #define PACKET_SIZE 250
@@ -20,7 +28,12 @@ int main(int argc, char *argv[])
     int sockfd;
     struct sockaddr_in sa;
     struct sockaddr_in ca;
+
+#ifdef _WIN32
+    int ca_len;
+#else
     socklen_t ca_len;
+#endif
 
     char packet[PACKET_SIZE];
     char ack[ACK_SIZE];
@@ -37,15 +50,16 @@ int main(int argc, char *argv[])
     /*
      * Optional command-line arguments:
      *
-     * ./receiver_gbn <packet_loss_%> <ack_loss_%>
+     * receiver_gbn <packet_loss_%> <ack_loss_%>
      *
-     * Example:
+     * Examples:
      *
-     * ./receiver_gbn 0 0
-     * ./receiver_gbn 25 0
-     * ./receiver_gbn 0 25
-     * ./receiver_gbn 25 25
+     * receiver_gbn 0 0
+     * receiver_gbn 25 0
+     * receiver_gbn 0 25
+     * receiver_gbn 25 25
      */
+
     if (argc >= 2)
     {
         packet_loss_probability = atoi(argv[1]);
@@ -73,14 +87,38 @@ int main(int argc, char *argv[])
      */
     srand((unsigned int)time(NULL));
 
+#ifdef _WIN32
+
+    /*
+     * Initialize Windows Sockets.
+     */
+    WSADATA wsa_data;
+
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0)
+    {
+        printf("WSAStartup failed.\n");
+        return 1;
+    }
+
+#endif
+
     /*
      * Create UDP socket.
      */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
+#ifdef _WIN32
+    if (sockfd == INVALID_SOCKET)
+#else
     if (sockfd < 0)
+#endif
     {
         perror("socket");
+
+#ifdef _WIN32
+        WSACleanup();
+#endif
+
         return 1;
     }
 
@@ -92,11 +130,18 @@ int main(int argc, char *argv[])
     if (setsockopt(sockfd,
                    SOL_SOCKET,
                    SO_REUSEADDR,
-                   &reuse,
+                   (const char *)&reuse,
                    sizeof(reuse)) < 0)
     {
         perror("setsockopt");
+
+#ifdef _WIN32
+        closesocket(sockfd);
+        WSACleanup();
+#else
         close(sockfd);
+#endif
+
         return 1;
     }
 
@@ -117,7 +162,14 @@ int main(int argc, char *argv[])
              sizeof(sa)) < 0)
     {
         perror("bind");
+
+#ifdef _WIN32
+        closesocket(sockfd);
+        WSACleanup();
+#else
         close(sockfd);
+#endif
+
         return 1;
     }
 
@@ -143,6 +195,15 @@ int main(int argc, char *argv[])
 
         ca_len = sizeof(ca);
 
+#ifdef _WIN32
+        int received =
+            recvfrom(sockfd,
+                     packet,
+                     sizeof(packet) - 1,
+                     0,
+                     (struct sockaddr *)&ca,
+                     &ca_len);
+#else
         ssize_t received =
             recvfrom(sockfd,
                      packet,
@@ -150,6 +211,7 @@ int main(int argc, char *argv[])
                      0,
                      (struct sockaddr *)&ca,
                      &ca_len);
+#endif
 
         if (received < 0)
         {
@@ -234,7 +296,7 @@ int main(int argc, char *argv[])
 
             if (sendto(sockfd,
                         ack,
-                        strlen(ack),
+                        (int)strlen(ack),
                         0,
                         (struct sockaddr *)&ca,
                         ca_len) < 0)
@@ -290,7 +352,7 @@ int main(int argc, char *argv[])
 
             if (sendto(sockfd,
                         ack,
-                        strlen(ack),
+                        (int)strlen(ack),
                         0,
                         (struct sockaddr *)&ca,
                         ca_len) < 0)
@@ -348,7 +410,7 @@ int main(int argc, char *argv[])
 
                 if (sendto(sockfd,
                             ack,
-                            strlen(ack),
+                            (int)strlen(ack),
                             0,
                             (struct sockaddr *)&ca,
                             ca_len) < 0)
@@ -366,7 +428,12 @@ int main(int argc, char *argv[])
         }
     }
 
+#ifdef _WIN32
+    closesocket(sockfd);
+    WSACleanup();
+#else
     close(sockfd);
+#endif
 
     return 0;
 }
