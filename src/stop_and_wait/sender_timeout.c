@@ -1,5 +1,5 @@
-
 #include "../rto/rto.h"
+#include "../channel/channel_emulator.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +28,11 @@
 #define INITIAL_RTO_MS 2000.0
 #define MAX_ATTEMPTS 5
 #define BUFFER_SIZE 1024
+
+#define PACKET_LOSS_PERCENT 0
+#define ACK_LOSS_PERCENT 0
+#define CHANNEL_DELAY_MS 0
+#define CHANNEL_SEED 12345
 
 static unsigned short calculate_checksum(const char *data)
 {
@@ -91,8 +96,11 @@ static void set_timeout(
     struct timeval tv;
 
     tv.tv_sec = (long)(timeout_ms / 1000.0);
-    tv.tv_usec = (long)((timeout_ms -
-                         (double)tv.tv_sec * 1000.0) * 1000.0);
+
+    tv.tv_usec = (long)(
+        (timeout_ms -
+         (double)tv.tv_sec * 1000.0) * 1000.0
+    );
 
     setsockopt(
         sock,
@@ -133,27 +141,36 @@ static int receive_ack(
     if (received < 0) {
 
 #ifdef _WIN32
+
         int error_code = WSAGetLastError();
 
         if (error_code == WSAETIMEDOUT) {
-            printf("Timeout waiting for ACK=%d\n", expected_seq);
+            printf(
+                "Timeout waiting for ACK=%d\n",
+                expected_seq
+            );
+
             return 0;
         }
 
-        /*
-         * Windows can report WSAECONNRESET (10054) when a UDP
-         * peer is no longer available.
-         *
-         * Treat it as a failed attempt rather than retrying
-         * forever.
-         */
         if (error_code == WSAECONNRESET) {
-            printf("recvfrom failed: %d\n", error_code);
-            printf("Treating receive error as failed attempt.\n");
+            printf(
+                "recvfrom failed: %d\n",
+                error_code
+            );
+
+            printf(
+                "Treating receive error as failed attempt.\n"
+            );
+
             return 0;
         }
 
-        printf("recvfrom failed: %d\n", error_code);
+        printf(
+            "recvfrom failed: %d\n",
+            error_code
+        );
+
         return 0;
 
 #else
@@ -162,7 +179,11 @@ static int receive_ack(
             errno == EWOULDBLOCK ||
             errno == ETIMEDOUT) {
 
-            printf("Timeout waiting for ACK=%d\n", expected_seq);
+            printf(
+                "Timeout waiting for ACK=%d\n",
+                expected_seq
+            );
+
             return 0;
         }
 
@@ -182,14 +203,26 @@ static int receive_ack(
 
     int ack_seq = -1;
 
-    if (sscanf(buffer, "ACK=%d", &ack_seq) != 1) {
-        printf("Invalid ACK received: %s\n", buffer);
+    if (sscanf(
+            buffer,
+            "ACK=%d",
+            &ack_seq) != 1) {
+
+        printf(
+            "Invalid ACK received: %s\n",
+            buffer
+        );
+
         return 0;
     }
 
-    printf("Received: %s\n", buffer);
+    printf(
+        "Received: %s\n",
+        buffer
+    );
 
     if (ack_seq != expected_seq) {
+
         printf(
             "Unexpected ACK=%d, expected ACK=%d\n",
             ack_seq,
@@ -213,7 +246,10 @@ int main(void)
 
     WSADATA wsa;
 
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+    if (WSAStartup(
+            MAKEWORD(2, 2),
+            &wsa) != 0) {
+
         printf("WSAStartup failed\n");
         return 1;
     }
@@ -222,9 +258,40 @@ int main(void)
 
     printf("Stop-and-Wait Sender Started\n");
     printf("Adaptive RTO: ENABLED\n");
-    printf("Initial RTO: %.2f ms\n", INITIAL_RTO_MS);
-    printf("Server: %s:%d\n", SERVER_IP, PORT);
-    printf("Maximum attempts per packet: %d\n\n", MAX_ATTEMPTS);
+    printf(
+        "Initial RTO: %.2f ms\n",
+        INITIAL_RTO_MS
+    );
+
+    printf(
+        "Channel Emulator: ENABLED\n"
+    );
+
+    printf(
+        "Packet loss: %d%%\n",
+        PACKET_LOSS_PERCENT
+    );
+
+    printf(
+        "ACK loss: %d%%\n",
+        ACK_LOSS_PERCENT
+    );
+
+    printf(
+        "Channel delay: %d ms\n",
+        CHANNEL_DELAY_MS
+    );
+
+    printf(
+        "Server: %s:%d\n",
+        SERVER_IP,
+        PORT
+    );
+
+    printf(
+        "Maximum attempts per packet: %d\n\n",
+        MAX_ATTEMPTS
+    );
 
 #ifdef _WIN32
 
@@ -235,7 +302,12 @@ int main(void)
     );
 
     if (sock == INVALID_SOCKET) {
-        printf("Socket creation failed: %d\n", WSAGetLastError());
+
+        printf(
+            "Socket creation failed: %d\n",
+            WSAGetLastError()
+        );
+
         WSACleanup();
         return 1;
     }
@@ -249,6 +321,7 @@ int main(void)
     );
 
     if (sock < 0) {
+
         perror("Socket creation failed");
         return 1;
     }
@@ -266,20 +339,33 @@ int main(void)
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(PORT);
 
-    server_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    server_addr.sin_addr.s_addr =
+        inet_addr(SERVER_IP);
 
-if (server_addr.sin_addr.s_addr == INADDR_NONE) {
-    printf("Invalid server address\n");
+    if (server_addr.sin_addr.s_addr ==
+        INADDR_NONE) {
+
+        printf("Invalid server address\n");
 
 #ifdef _WIN32
-    closesocket(sock);
-    WSACleanup();
+        closesocket(sock);
+        WSACleanup();
 #else
-    close(sock);
+        close(sock);
 #endif
 
-    return 1;
-}
+        return 1;
+    }
+
+    ChannelConfig channel;
+
+    channel_init(
+        &channel,
+        PACKET_LOSS_PERCENT,
+        ACK_LOSS_PERCENT,
+        CHANNEL_DELAY_MS,
+        CHANNEL_SEED
+    );
 
     RTOEstimator rto;
 
@@ -304,10 +390,17 @@ if (server_addr.sin_addr.s_addr == INADDR_NONE) {
             break;
         }
 
-        message[strcspn(message, "\r\n")] = '\0';
+        message[strcspn(
+            message,
+            "\r\n"
+        )] = '\0';
 
         if (strlen(message) == 0) {
-            printf("Message cannot be empty.\n\n");
+
+            printf(
+                "Message cannot be empty.\n\n"
+            );
+
             continue;
         }
 
@@ -327,7 +420,6 @@ if (server_addr.sin_addr.s_addr == INADDR_NONE) {
 
         int acknowledged = 0;
         int attempt = 0;
-
         int retransmitted = 0;
 
         while (!acknowledged &&
@@ -335,12 +427,50 @@ if (server_addr.sin_addr.s_addr == INADDR_NONE) {
 
             attempt++;
 
-            printf("\nSending SEQ=%d\n", sequence_number);
-            printf("Attempt: %d\n", attempt);
+            printf(
+                "\nSending SEQ=%d\n",
+                sequence_number
+            );
+
+            printf(
+                "Attempt: %d\n",
+                attempt
+            );
+
             printf(
                 "Current RTO: %.2f ms\n",
                 rto_get(&rto)
             );
+
+            /*
+             * Simulate packet loss before sending.
+             */
+            if (channel_should_drop_packet(
+                    &channel)) {
+
+                printf(
+                    "CHANNEL EMULATOR: "
+                    "Dropping packet SEQ=%d\n",
+                    sequence_number
+                );
+
+                retransmitted = 1;
+
+                if (attempt < MAX_ATTEMPTS) {
+
+                    printf(
+                        "Retransmitting SEQ=%d...\n",
+                        sequence_number
+                    );
+                }
+
+                continue;
+            }
+
+            /*
+             * Simulate configurable channel delay.
+             */
+            channel_delay(&channel);
 
             int sent = sendto(
                 sock,
@@ -354,12 +484,16 @@ if (server_addr.sin_addr.s_addr == INADDR_NONE) {
             if (sent < 0) {
 
 #ifdef _WIN32
+
                 printf(
                     "sendto failed: %d\n",
                     WSAGetLastError()
                 );
+
 #else
+
                 perror("sendto failed");
+
 #endif
 
                 continue;
@@ -373,6 +507,28 @@ if (server_addr.sin_addr.s_addr == INADDR_NONE) {
                 rto_get(&rto),
                 &sample_rtt
             );
+
+            if (result) {
+
+                /*
+                 * Simulate ACK loss after reception.
+                 *
+                 * The ACK has already arrived at the sender,
+                 * but the emulator can discard it logically
+                 * before the sender accepts it.
+                 */
+                if (channel_should_drop_ack(
+                        &channel)) {
+
+                    printf(
+                        "CHANNEL EMULATOR: "
+                        "Dropping ACK=%d\n",
+                        sequence_number
+                    );
+
+                    result = 0;
+                }
+            }
 
             if (result) {
 
@@ -471,7 +627,9 @@ if (server_addr.sin_addr.s_addr == INADDR_NONE) {
 
 #endif
 
-    printf("\nStop-and-Wait Sender Stopped.\n");
+    printf(
+        "\nStop-and-Wait Sender Stopped.\n"
+    );
 
     return 0;
 }

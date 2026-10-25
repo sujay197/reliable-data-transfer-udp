@@ -106,7 +106,7 @@ int main()
                     snprintf(expected_ack, sizeof(expected_ack), "ACK=%d", seq);
 
                     printf("Received: %s\n", buf1);
-                    
+
                     if (strcmp(buf1, expected_ack) == 0)
                     {
                         printf("Valid ACK received.\n");
@@ -114,7 +114,7 @@ int main()
                         break;
                     }
                     else
-                    { 
+                    {
                         printf("Invalid ACK! Expected %s\n", expected_ack);
                     }
                 }
@@ -130,7 +130,7 @@ int main()
             }
             attempts++;
         }
-        
+
         if (acknowledgment_not_received)
         {
             printf("Transmission failed after 3 attempts.\n");

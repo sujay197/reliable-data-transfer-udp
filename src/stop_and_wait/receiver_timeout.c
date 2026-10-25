@@ -1,3 +1,4 @@
+#include "../channel/channel_emulator.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,11 @@
 
 #define PORT 6025
 #define BUFFER_SIZE 1024
+
+#define PACKET_LOSS_PERCENT 0
+#define ACK_LOSS_PERCENT 0
+#define CHANNEL_DELAY_MS 0
+#define CHANNEL_SEED 12345
 
 static unsigned short calculate_checksum(const char *data)
 {
@@ -116,9 +122,32 @@ int main(void)
         return 1;
     }
 
+    ChannelConfig channel;
+
+    channel_init(
+        &channel,
+        PACKET_LOSS_PERCENT,
+        ACK_LOSS_PERCENT,
+        CHANNEL_DELAY_MS,
+        CHANNEL_SEED
+    );
+
     printf("Stop-and-Wait Receiver Started\n");
     printf("Listening on port: %d\n", PORT);
     printf("Adaptive RTO is handled by the sender.\n");
+    printf("Channel Emulator: ENABLED\n");
+    printf(
+        "Packet loss: %d%%\n",
+        PACKET_LOSS_PERCENT
+    );
+    printf(
+        "ACK loss: %d%%\n",
+        ACK_LOSS_PERCENT
+    );
+    printf(
+        "Channel delay: %d ms\n",
+        CHANNEL_DELAY_MS
+    );
     printf("Waiting for packets...\n\n");
 
     int expected_sequence = 0;
@@ -130,9 +159,14 @@ int main(void)
         struct sockaddr_in client_addr;
 
 #ifdef _WIN32
+
         int client_len = sizeof(client_addr);
+
 #else
-        socklen_t client_len = sizeof(client_addr);
+
+        socklen_t client_len =
+            sizeof(client_addr);
+
 #endif
 
         int received = recvfrom(
@@ -164,7 +198,32 @@ int main(void)
 
         buffer[received] = '\0';
 
-        printf("Received: %s\n", buffer);
+        printf(
+            "Received: %s\n",
+            buffer
+        );
+
+        /*
+         * Simulate packet loss at the receiver.
+         *
+         * The sender may retransmit the same packet
+         * when this happens.
+         */
+        if (channel_should_drop_packet(
+                &channel)) {
+
+            printf(
+                "CHANNEL EMULATOR: "
+                "Dropping received packet\n\n"
+            );
+
+            continue;
+        }
+
+        /*
+         * Apply configurable channel delay.
+         */
+        channel_delay(&channel);
 
         int sequence_number = -1;
         unsigned int received_checksum = 0;
@@ -186,7 +245,10 @@ int main(void)
 
         if (parsed != 3) {
 
-            printf("Invalid packet format.\n\n");
+            printf(
+                "Invalid packet format.\n\n"
+            );
+
             continue;
         }
 
@@ -202,7 +264,8 @@ int main(void)
             (unsigned short)received_checksum) {
 
             printf(
-                "Checksum mismatch. Packet corrupted.\n\n"
+                "Checksum mismatch. "
+                "Packet corrupted.\n\n"
             );
 
             continue;
@@ -231,6 +294,33 @@ int main(void)
                 sequence_number
             );
 
+            /*
+             * Simulate ACK loss before sending.
+             */
+            if (channel_should_drop_ack(
+                    &channel)) {
+
+                printf(
+                    "CHANNEL EMULATOR: "
+                    "Dropping ACK=%d\n\n",
+                    sequence_number
+                );
+
+                /*
+                 * The packet was accepted and delivered,
+                 * so advance the expected sequence.
+                 *
+                 * The sender will timeout and retransmit.
+                 * The duplicate handling below will then
+                 * resend the ACK.
+                 */
+                expected_sequence++;
+
+                continue;
+            }
+
+            channel_delay(&channel);
+
             sendto(
                 sock,
                 ack,
@@ -252,8 +342,9 @@ int main(void)
             /*
              * Duplicate packet.
              *
-             * This can happen when the original ACK was lost.
-             * Re-send the ACK so the sender can stop retransmitting.
+             * This happens when the original ACK was lost.
+             * Re-send the ACK so the sender can stop
+             * retransmitting.
              */
 
             printf(
@@ -269,6 +360,23 @@ int main(void)
                 "ACK=%d",
                 sequence_number
             );
+
+            /*
+             * Apply ACK-loss simulation to duplicate ACKs too.
+             */
+            if (channel_should_drop_ack(
+                    &channel)) {
+
+                printf(
+                    "CHANNEL EMULATOR: "
+                    "Dropping duplicate ACK=%d\n\n",
+                    sequence_number
+                );
+
+                continue;
+            }
+
+            channel_delay(&channel);
 
             sendto(
                 sock,
@@ -287,14 +395,15 @@ int main(void)
         } else {
 
             printf(
-                "Unexpected SEQ=%d. Expected SEQ=%d.\n",
+                "Unexpected SEQ=%d. "
+                "Expected SEQ=%d.\n",
                 sequence_number,
                 expected_sequence
             );
 
             /*
-             * Do not acknowledge packets that arrive ahead
-             * of the expected sequence number.
+             * Do not acknowledge packets that arrive
+             * ahead of the expected sequence number.
              */
 
         }

@@ -1,0 +1,13 @@
+test_id,protocol,test_type,packet_loss_percent,ack_loss_percent,delay_ms,total_packets,retransmissions,timeouts,initial_rto_ms,final_rto_ms,in_order_delivery,transfer_completed,notes
+9.1,Stop-and-Wait,No Loss,0,0,0,4,None,0,2000.00,3749.34,Yes,Yes,"Normal transfer with no simulated loss"
+9.2,Stop-and-Wait,Packet Loss,30,0,0,4,Yes,3,2000.00,5307.76,Yes,Yes,"SEQ=3 lost; retransmitted; Karn applied"
+9.3,Stop-and-Wait,ACK Loss,0,30,0,4,Yes,3,2000.00,5307.72,Yes,Yes,"ACK loss caused retransmissions; Karn applied"
+9.4,Go-Back-N,No Loss,0,0,0,12,None,0,2000.00,3359.64,Yes,Yes,"All 12 packets acknowledged"
+9.5,Go-Back-N,Packet Loss,30,0,0,12,Yes,Multiple,2000.00,4765.62,Yes,Yes,"Go-Back-N retransmitted outstanding packets after loss"
+9.6,Go-Back-N,ACK Loss,0,30,0,12,Yes,Yes,2000.00,5032.69,Yes,Yes,"ACK loss recovered using cumulative ACKs"
+9.7,Selective Repeat,No Loss,0,0,0,10,SEQ=2,1,2000.00,4225.40,Yes,Yes,"Built-in first-copy SEQ=2 drop; selective retransmission"
+9.8,Selective Repeat,Packet Loss,30,0,0,10,"SEQ=2,3,4,5,6,7,8",Yes,2000.00,5052.19,Yes,Yes,"Selective retransmissions after packet loss"
+9.9,Selective Repeat,ACK Loss,0,30,0,10,Yes,Yes,2000.00,5299.35,Yes,Yes,"ACK loss caused individual packet retransmissions"
+9.10,Selective Repeat,Adaptive RTO Under Delay,0,0,500,10,Yes,Yes,2000.00,2655.53,Yes,Yes,"RTT samples 1027.56 ms and 1920.90 ms; adaptive RTO changed to 2850.88 then 2655.53 ms"
+9.11,Selective Repeat,Retransmissions Under Delay,0,0,500,10,"SEQ=2,3,4,5,6,7,8,9",Yes,2000.00,2655.36,Yes,Yes,"Timeouts and retransmissions observed; Karn applied"
+9.12,Selective Repeat,In-Order Delivery,0,0,0,10,SEQ=2,1,2000.00,4225.98,Yes,Yes,"Packets 3-5 acknowledged before SEQ=2; receiver buffered them and delivered in order"

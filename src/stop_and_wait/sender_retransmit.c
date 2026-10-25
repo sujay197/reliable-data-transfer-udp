@@ -103,7 +103,7 @@ int main()
                     buf1[k] = '\0';
                     printf("Received: %s\n", buf1);
                     acknowledgment_not_received = 0;
-                    break; 
+                    break;
                 }
             }
             else if (ready == 0)
@@ -117,7 +117,7 @@ int main()
             }
             attempts++;
         }
-        
+
         if (acknowledgment_not_received)
         {
             printf("Transmission failed after 3 attempts.\n");

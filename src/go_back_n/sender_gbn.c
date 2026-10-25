@@ -1,9 +1,13 @@
 #ifdef _WIN32
+
 #define _WIN32_WINNT 0x0601
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+
 #else
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +17,7 @@
 #include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
 #endif
 
 #include <stdio.h>
@@ -20,6 +25,7 @@
 #include <string.h>
 
 #include "../rto/rto.h"
+#include "../channel/channel_emulator.h"
 
 #ifdef _WIN32
 #pragma comment(lib, "ws2_32.lib")
@@ -30,6 +36,9 @@
 #define TOTAL_PACKETS 12
 #define PACKET_SIZE 250
 #define ACK_SIZE 250
+
+#define CHANNEL_DELAY_MS 100
+#define CHANNEL_SEED 12345
 
 typedef struct
 {
@@ -44,6 +53,7 @@ typedef struct
 static double get_time_ms(void)
 {
 #ifdef _WIN32
+
     LARGE_INTEGER frequency;
     LARGE_INTEGER counter;
 
@@ -52,13 +62,16 @@ static double get_time_ms(void)
 
     return ((double)counter.QuadPart * 1000.0) /
            (double)frequency.QuadPart;
+
 #else
+
     struct timeval tv;
 
     gettimeofday(&tv, NULL);
 
     return (double)tv.tv_sec * 1000.0 +
            (double)tv.tv_usec / 1000.0;
+
 #endif
 }
 
@@ -67,6 +80,18 @@ static double get_time_ms(void)
  */
 static void apply_rto_timeout(int sockfd, double rto_ms)
 {
+#ifdef _WIN32
+
+    DWORD timeout = (DWORD)(rto_ms + 0.5);
+
+    setsockopt(sockfd,
+               SOL_SOCKET,
+               SO_RCVTIMEO,
+               (const char *)&timeout,
+               sizeof(timeout));
+
+#else
+
     struct timeval timeout;
 
     timeout.tv_sec = (long)(rto_ms / 1000.0);
@@ -81,6 +106,8 @@ static void apply_rto_timeout(int sockfd, double rto_ms)
                SO_RCVTIMEO,
                (const char *)&timeout,
                sizeof(timeout));
+
+#endif
 }
 
 int main(void)
@@ -97,6 +124,7 @@ int main(void)
     int ack_num;
 
     RTOEstimator rto;
+    ChannelConfig channel;
 
     PacketInfo packets[TOTAL_PACKETS];
 
@@ -114,6 +142,19 @@ int main(void)
      * Initial adaptive RTO.
      */
     rto_init(&rto, 2000.0);
+
+    /*
+     * Initialize Channel Emulator.
+     *
+     * Packet loss and ACK loss are handled by the
+     * GBN receiver. The sender uses the shared
+     * emulator for outgoing channel delay.
+     */
+    channel_init(&channel,
+                 0,
+                 0,
+                 CHANNEL_DELAY_MS,
+                 CHANNEL_SEED);
 
 #ifdef _WIN32
 
@@ -172,8 +213,13 @@ int main(void)
     printf("=====================================\n");
     printf("Window size: %d\n", WINDOW_SIZE);
     printf("Total packets: %d\n", TOTAL_PACKETS);
-    printf("Packet loss handling: ENABLED\n");
-    printf("Initial RTO: %.2f ms\n", rto_get(&rto));
+    printf("Adaptive RTO: ENABLED\n");
+    printf("Channel Emulator: ENABLED\n");
+    printf("Outgoing channel delay: %d ms\n",
+           CHANNEL_DELAY_MS);
+    printf("Packet/ACK loss: handled by receiver\n");
+    printf("Initial RTO: %.2f ms\n",
+           rto_get(&rto));
     printf("Receiver: 127.0.0.1:%d\n\n", PORT);
 
     /*
@@ -197,6 +243,11 @@ int main(void)
                      seq);
 
             printf("Sending: %s\n", packet);
+
+            /*
+             * Apply outgoing channel delay.
+             */
+            channel_delay(&channel);
 
             if (sendto(sockfd,
                        packet,
@@ -233,6 +284,7 @@ int main(void)
         memset(ack, 0, sizeof(ack));
 
 #ifdef _WIN32
+
         int received =
             recvfrom(sockfd,
                      ack,
@@ -240,7 +292,9 @@ int main(void)
                      0,
                      NULL,
                      NULL);
+
 #else
+
         ssize_t received =
             recvfrom(sockfd,
                      ack,
@@ -248,6 +302,7 @@ int main(void)
                      0,
                      NULL,
                      NULL);
+
 #endif
 
         /*
@@ -275,6 +330,12 @@ int main(void)
                          i);
 
                 printf("Retransmitting: %s\n", packet);
+
+                /*
+                 * Apply outgoing channel delay to
+                 * retransmitted packets as well.
+                 */
+                channel_delay(&channel);
 
                 if (sendto(sockfd,
                            packet,
