@@ -1,3 +1,13 @@
+#ifdef _WIN32
+
+#define _WIN32_WINNT 0x0601
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
+#else
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,14 +18,99 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../rto/rto.h"
+#include "../channel/channel_emulator.h"
+
+#ifdef _WIN32
+#pragma comment(lib, "ws2_32.lib")
+#endif
+
 #define PORT 6025
 #define WINDOW_SIZE 4
 #define TOTAL_PACKETS 12
 #define PACKET_SIZE 250
 #define ACK_SIZE 250
-#define TIMEOUT_SEC 2
 
-int main()
+#define CHANNEL_DELAY_MS 100
+#define CHANNEL_SEED 12345
+
+typedef struct
+{
+    double send_time_ms;
+    int sent;
+    int retransmitted;
+} PacketInfo;
+
+/*
+ * Return the current time in milliseconds.
+ */
+static double get_time_ms(void)
+{
+#ifdef _WIN32
+
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER counter;
+
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&counter);
+
+    return ((double)counter.QuadPart * 1000.0) /
+           (double)frequency.QuadPart;
+
+#else
+
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    return (double)tv.tv_sec * 1000.0 +
+           (double)tv.tv_usec / 1000.0;
+
+#endif
+}
+
+/*
+ * Apply the current RTO value to the UDP socket.
+ */
+static void apply_rto_timeout(int sockfd, double rto_ms)
+{
+#ifdef _WIN32
+
+    DWORD timeout = (DWORD)(rto_ms + 0.5);
+
+    setsockopt(sockfd,
+               SOL_SOCKET,
+               SO_RCVTIMEO,
+               (const char *)&timeout,
+               sizeof(timeout));
+
+#else
+
+    struct timeval timeout;
+
+    timeout.tv_sec = (long)(rto_ms / 1000.0);
+
+    timeout.tv_usec =
+        (long)((rto_ms -
+                timeout.tv_sec * 1000.0) *
+               1000.0);
+
+    setsockopt(sockfd,
+               SOL_SOCKET,
+               SO_RCVTIMEO,
+               (const char *)&timeout,
+               sizeof(timeout));
+
+#endif
+}
+
+int main(void)
 {
     int sockfd;
     struct sockaddr_in sa;
@@ -28,86 +123,157 @@ int main()
 
     int ack_num;
 
-    /* Create UDP socket */
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    RTOEstimator rto;
+    ChannelConfig channel;
 
-    if (sockfd < 0)
+    PacketInfo packets[TOTAL_PACKETS];
+
+    /*
+     * Initialize packet information.
+     */
+    for (int i = 0; i < TOTAL_PACKETS; i++)
     {
-        perror("socket");
+        packets[i].send_time_ms = 0.0;
+        packets[i].sent = 0;
+        packets[i].retransmitted = 0;
+    }
+
+    /*
+     * Initial adaptive RTO.
+     */
+    rto_init(&rto, 2000.0);
+
+    /*
+     * Initialize Channel Emulator.
+     *
+     * Packet loss and ACK loss are handled by the
+     * GBN receiver. The sender uses the shared
+     * emulator for outgoing channel delay.
+     */
+    channel_init(&channel,
+                 0,
+                 0,
+                 CHANNEL_DELAY_MS,
+                 CHANNEL_SEED);
+
+#ifdef _WIN32
+
+    /*
+     * Initialize Windows Sockets.
+     */
+    WSADATA wsa_data;
+
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0)
+    {
+        printf("WSAStartup failed.\n");
         return 1;
     }
 
-    /* Configure receiver address */
+#endif
+
+    /*
+     * Create UDP socket.
+     */
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+#ifdef _WIN32
+    if (sockfd == INVALID_SOCKET)
+#else
+    if (sockfd < 0)
+#endif
+    {
+        perror("socket");
+
+#ifdef _WIN32
+        WSACleanup();
+#endif
+
+        return 1;
+    }
+
+    /*
+     * Configure receiver address.
+     */
     memset(&sa, 0, sizeof(sa));
 
     sa.sin_family = AF_INET;
     sa.sin_addr.s_addr = inet_addr("127.0.0.1");
     sa.sin_port = htons(PORT);
 
-    /* Set receive timeout */
-    struct timeval timeout;
+    /*
+     * Apply initial RTO as socket receive timeout.
+     */
+    apply_rto_timeout(sockfd, rto_get(&rto));
 
-    timeout.tv_sec = TIMEOUT_SEC;
-    timeout.tv_usec = 0;
-
-    if (setsockopt(sockfd,
-                   SOL_SOCKET,
-                   SO_RCVTIMEO,
-                   &timeout,
-                   sizeof(timeout)) < 0)
-    {
-        perror("setsockopt");
-        close(sockfd);
-        return 1;
-    }
-
-    /* Startup information */
+    /*
+     * Startup information.
+     */
     printf("=====================================\n");
     printf("      Go-Back-N Sender Started\n");
     printf("=====================================\n");
     printf("Window size: %d\n", WINDOW_SIZE);
     printf("Total packets: %d\n", TOTAL_PACKETS);
-    printf("Packet loss handling: ENABLED\n");
-    printf("Timeout: %d seconds\n", TIMEOUT_SEC);
+    printf("Adaptive RTO: ENABLED\n");
+    printf("Channel Emulator: ENABLED\n");
+    printf("Outgoing channel delay: %d ms\n",
+           CHANNEL_DELAY_MS);
+    printf("Packet/ACK loss: handled by receiver\n");
+    printf("Initial RTO: %.2f ms\n",
+           rto_get(&rto));
     printf("Receiver: 127.0.0.1:%d\n\n", PORT);
 
     /*
      * Continue until every packet has been acknowledged.
-     *
-     * base:
-     *   Oldest unacknowledged packet.
-     *
-     * next_seq_num:
-     *   Next new packet that can be transmitted.
      */
     while (base < TOTAL_PACKETS)
     {
         /*
-         * Send new packets while there is space
+         * Send new packets while there is room
          * in the Go-Back-N sliding window.
          */
         while (next_seq_num < base + WINDOW_SIZE &&
                next_seq_num < TOTAL_PACKETS)
         {
+            int seq = next_seq_num;
+
             snprintf(packet,
                      sizeof(packet),
                      "SEQ=%d|DATA=Packet%d",
-                     next_seq_num,
-                     next_seq_num);
+                     seq,
+                     seq);
 
             printf("Sending: %s\n", packet);
 
+            /*
+             * Apply outgoing channel delay.
+             */
+            channel_delay(&channel);
+
             if (sendto(sockfd,
                        packet,
-                       strlen(packet),
+                       (int)strlen(packet),
                        0,
                        (struct sockaddr *)&sa,
                        sizeof(sa)) < 0)
             {
                 perror("sendto");
+
+#ifdef _WIN32
+                closesocket(sockfd);
+                WSACleanup();
+#else
                 close(sockfd);
+#endif
+
                 return 1;
             }
+
+            /*
+             * Record the exact send time for this packet.
+             */
+            packets[seq].send_time_ms = get_time_ms();
+            packets[seq].sent = 1;
+            packets[seq].retransmitted = 0;
 
             next_seq_num++;
         }
@@ -117,20 +283,36 @@ int main()
          */
         memset(ack, 0, sizeof(ack));
 
-        ssize_t received = recvfrom(sockfd,
-                                    ack,
-                                    sizeof(ack) - 1,
-                                    0,
-                                    NULL,
-                                    NULL);
+#ifdef _WIN32
+
+        int received =
+            recvfrom(sockfd,
+                     ack,
+                     sizeof(ack) - 1,
+                     0,
+                     NULL,
+                     NULL);
+
+#else
+
+        ssize_t received =
+            recvfrom(sockfd,
+                     ack,
+                     sizeof(ack) - 1,
+                     0,
+                     NULL,
+                     NULL);
+
+#endif
 
         /*
-         * No ACK received before timeout.
+         * No ACK received before the current RTO.
          */
         if (received < 0)
         {
             printf("\n*** TIMEOUT ***\n");
-            printf("No ACK received for %d seconds.\n", TIMEOUT_SEC);
+            printf("Current adaptive RTO: %.2f ms\n",
+                   rto_get(&rto));
             printf("Base = %d\n", base);
             printf("Retransmitting unacknowledged packets...\n\n");
 
@@ -149,17 +331,46 @@ int main()
 
                 printf("Retransmitting: %s\n", packet);
 
+                /*
+                 * Apply outgoing channel delay to
+                 * retransmitted packets as well.
+                 */
+                channel_delay(&channel);
+
                 if (sendto(sockfd,
                            packet,
-                           strlen(packet),
+                           (int)strlen(packet),
                            0,
                            (struct sockaddr *)&sa,
                            sizeof(sa)) < 0)
                 {
                     perror("sendto");
+
+#ifdef _WIN32
+                    closesocket(sockfd);
+                    WSACleanup();
+#else
                     close(sockfd);
+#endif
+
                     return 1;
                 }
+
+                /*
+                 * Mark packet as retransmitted.
+                 *
+                 * Karn's algorithm:
+                 * an RTT sample from a retransmitted packet
+                 * must not be used to update the RTO.
+                 */
+                packets[i].retransmitted = 1;
+
+                /*
+                 * Record the new transmission time.
+                 * This is useful for timeout tracking, but
+                 * the ACK will not be used as an RTT sample.
+                 */
+                packets[i].send_time_ms = get_time_ms();
             }
 
             printf("\n");
@@ -183,23 +394,66 @@ int main()
 
             /*
              * VALID ACK
-             *
-             * ACK must:
-             *
-             * 1. Be at or after the current base.
-             * 2. Refer to a packet that has actually
-             *    been sent.
-             *
-             * next_seq_num is one greater than the
-             * highest packet sent.
-             *
-             * Therefore valid ACK numbers are:
-             *
-             *     base <= ACK < next_seq_num
              */
             if (ack_num >= base &&
                 ack_num < next_seq_num)
             {
+                /*
+                 * Measure RTT only if this packet
+                 * was not retransmitted.
+                 */
+                if (packets[ack_num].sent &&
+                    !packets[ack_num].retransmitted)
+                {
+                    double ack_time_ms =
+                        get_time_ms();
+
+                    double measured_rtt_ms =
+                        ack_time_ms -
+                        packets[ack_num].send_time_ms;
+
+                    /*
+                     * Avoid zero/negative RTT.
+                     */
+                    if (measured_rtt_ms <= 0.0)
+                    {
+                        measured_rtt_ms = 1.0;
+                    }
+
+                    /*
+                     * Update adaptive RTO.
+                     */
+                    rto_update(&rto,
+                               measured_rtt_ms);
+
+                    /*
+                     * Apply updated RTO.
+                     */
+                    apply_rto_timeout(sockfd,
+                                      rto_get(&rto));
+
+                    printf("Measured RTT: %.2f ms\n",
+                           measured_rtt_ms);
+
+                    printf("Updated RTO: %.2f ms\n",
+                           rto_get(&rto));
+                }
+                else
+                {
+                    /*
+                     * ACK corresponds to a retransmitted
+                     * packet. Do not use it for RTT/RTO.
+                     */
+                    printf("RTT sample skipped "
+                           "(packet was retransmitted).\n");
+
+                    printf("Current RTO: %.2f ms\n",
+                           rto_get(&rto));
+                }
+
+                /*
+                 * Advance the Go-Back-N base.
+                 */
                 base = ack_num + 1;
 
                 printf("ACK accepted: %d\n", ack_num);
@@ -211,33 +465,29 @@ int main()
              */
             else if (ack_num < base)
             {
-                printf("Duplicate/old ACK: %d\n", ack_num);
-                printf("Current base remains: %d\n", base);
+                printf("Duplicate/old ACK: %d\n",
+                       ack_num);
+
+                printf("Current base remains: %d\n",
+                       base);
             }
 
             /*
              * INVALID / FUTURE ACK
-             *
-             * Example:
-             *
-             * base = 0
-             * next_seq_num = 4
-             *
-             * ACK=99 is invalid because packet 99
-             * has never been sent.
              */
             else
             {
-                printf("Invalid/future ACK: %d\n", ack_num);
-                printf("Current base remains: %d\n", base);
+                printf("Invalid/future ACK: %d\n",
+                       ack_num);
+
+                printf("Current base remains: %d\n",
+                       base);
             }
         }
         else
         {
-            /*
-             * ACK could not be parsed.
-             */
-            printf("Invalid ACK received: %s\n", ack);
+            printf("Invalid ACK received: %s\n",
+                   ack);
         }
 
         printf("\n");
@@ -250,10 +500,19 @@ int main()
     printf("     Transmission Complete\n");
     printf("=====================================\n");
     printf("Base: %d\n", base);
-    printf("Next sequence number: %d\n", next_seq_num);
-    printf("All %d packets acknowledged.\n", TOTAL_PACKETS);
+    printf("Next sequence number: %d\n",
+           next_seq_num);
+    printf("Final RTO: %.2f ms\n",
+           rto_get(&rto));
+    printf("All %d packets acknowledged.\n",
+           TOTAL_PACKETS);
 
+#ifdef _WIN32
+    closesocket(sockfd);
+    WSACleanup();
+#else
     close(sockfd);
+#endif
 
     return 0;
 }

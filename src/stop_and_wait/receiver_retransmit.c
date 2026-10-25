@@ -82,9 +82,9 @@ int main()
             printf("Invalid packet format\n");
             continue;
         }
-        
+
         printf("Received packet with sequence number: %d\n", seq);
-        
+
         calculated_checksum = calculate_checksum(data, strlen(data));
 
         if (received_checksum == calculated_checksum)

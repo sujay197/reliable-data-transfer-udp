@@ -65,7 +65,7 @@ int main()
 
         int k = recvfrom(sockfd, buf, sizeof(buf) - 1, 0,
                          (struct sockaddr *)&ca, &length);
-        
+
         if (k < 0)
         {
             perror("recvfrom");
@@ -89,35 +89,35 @@ int main()
             printf("Invalid packet format\n");
             continue;
         }
-        
+
         printf("Received packet with sequence number: %d\n", seq);
-        
+
         calculated_checksum = calculate_checksum(data, strlen(data));
 
         if (received_checksum == calculated_checksum)
-        {   
+        {
             printf("Checksum valid\n");
-            
+
             if (seq == expected_seq)
             {
                 printf("New packet accepted: SEQ=%d\n", seq);
-                
+
                 sprintf(ack, "ACK=%d", seq);
-                
+
                 printf("Sending: %s\n", ack);
-                
+
                 sendto(sockfd, ack, strlen(ack), 0, (struct sockaddr *)&ca, sizeof(ca));
-                
+
                 expected_seq++;
             }
             else if (seq < expected_seq)
             {
                 printf("Duplicate packet received: SEQ=%d\n", seq);
-                
+
                 sprintf(ack, "ACK=%d", seq);
-                
+
                 printf("Resending: %s\n", ack);
-                
+
                 sendto(sockfd, ack, strlen(ack), 0, (struct sockaddr *)&ca, sizeof(ca));
             }
             else

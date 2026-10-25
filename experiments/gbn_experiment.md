@@ -7,76 +7,89 @@
 - Total packets: 12
 - Transport: UDP
 - Receiver: 127.0.0.1:6025
-- Timeout: 2 seconds
+- Initial adaptive RTO: 2000 ms
+- Channel emulator: packet loss, ACK loss, and delay supported
+- Adaptive RTO: Enabled
+- Karn's algorithm: Enabled
 
-## Experiments
+## Week 5 Tests
 
-| Experiment | Packet Loss | ACK Loss | Timeouts | Result |
-|---|---:|---:|---:|---|
-| E1 | 0% | 0% | 0 | Success |
-| E2 | 25% | 0% | 1 | Success |
-| E3 | 0% | 25% | 0 | Success |
-| E4 | 25% | 25% | 3 | Success |
+| Test | Packet Loss | ACK Loss | Delay | Result | Final RTO |
+|---|---:|---:|---:|---|---:|
+| No Loss | 0% | 0% | 0 ms | Success | 3359.64 ms |
+| Packet Loss | 30% | 0% | 0 ms | Success | 4765.62 ms |
+| ACK Loss | 0% | 30% | 0 ms | Success | 5032.69 ms |
+| Combined Loss | 25% | 25% | 100 ms | Success | 4313.23 ms |
 
-## E1 - No Loss
+## No Loss
 
-Packet loss was set to 0% and ACK loss was set to 0%.
+With packet loss and ACK loss disabled, all 12 packets were acknowledged successfully.
 
-All 12 packets were acknowledged without timeout or retransmission.
+- Packets acknowledged: 12/12
+- Retransmissions: None
+- Initial RTO: 2000.00 ms
+- Final RTO: 3359.64 ms
+- Transfer completed: Yes
 
-Final sender state:
+The adaptive RTO estimator updated its timeout value based on measured RTT samples.
 
-- Base: 12
-- Next sequence number: 12
-- Result: Successful
+## Packet Loss
 
-## E2 - Packet Loss Only
+With 30% simulated packet loss and no ACK loss, the receiver dropped packets during transmission.
 
-Packet loss was set to 25% and ACK loss was set to 0%.
+The Go-Back-N sender detected missing acknowledgements through timeout and retransmitted all outstanding packets from the current base.
 
-Packet 10 was simulated as lost. Packet 11 subsequently arrived out of order and the receiver sent the previous cumulative ACK.
+- Packet loss: 30%
+- ACK loss: 0%
+- Retransmissions: Yes
+- Timeouts: Multiple
+- Duplicate/old ACKs: Observed
+- Karn's algorithm: Applied
+- Packets acknowledged: 12/12
+- Final RTO: 4765.62 ms
+- Transfer completed: Yes
 
-The sender timed out and retransmitted packets 10 and 11.
+## ACK Loss
 
-Final sender state:
+With 30% simulated ACK loss and no packet loss, some acknowledgements were not received by the sender.
 
-- Base: 12
-- Next sequence number: 12
-- Timeouts: 1
-- Result: Successful
+Go-Back-N recovered using cumulative acknowledgements. When a timeout occurred, the sender retransmitted the outstanding packet(s), and the transfer eventually completed.
 
-## E3 - ACK Loss Only
+- Packet loss: 0%
+- ACK loss: 30%
+- Retransmissions: Yes
+- Timeouts: Yes
+- Cumulative ACK recovery: Yes
+- Packets acknowledged: 12/12
+- Final RTO: 5032.69 ms
+- Transfer completed: Yes
 
-Packet loss was set to 0% and ACK loss was set to 25%.
+## Combined Loss and Channel Delay
 
-ACK=1 was deliberately lost by the receiver. A later cumulative ACK=2 allowed the sender to advance its base beyond packet 1 without requiring a timeout.
+The channel emulator was also tested with packet loss, ACK loss, and 100 ms channel delay.
 
-Final sender state:
+Multiple timeout and retransmission events occurred, but the sender eventually acknowledged all packets.
 
-- Base: 12
-- Next sequence number: 12
-- Timeouts: 0
-- Result: Successful
+- Packet loss: 25%
+- ACK loss: 25%
+- Channel delay: 100 ms
+- Retransmissions: Yes
+- Timeouts: Multiple
+- Karn's algorithm: Applied
+- Packets acknowledged: 12/12
+- Final RTO: 4313.23 ms
+- Transfer completed: Yes
 
-## E4 - Combined Packet and ACK Loss
+## Adaptive RTO
 
-Packet loss was set to 25% and ACK loss was set to 25%.
+Adaptive RTO was integrated into the Go-Back-N sender.
 
-Both packet loss and ACK loss occurred. The receiver rejected out-of-order packets and returned previous cumulative ACKs. The sender performed Go-Back-N retransmissions after timeouts.
+The estimator updates the smoothed RTT and RTT deviation after valid RTT samples. Retransmitted packets are excluded from RTT measurement according to Karn's algorithm.
 
-Three timeout events occurred at bases 3, 4, and 8.
-
-Final sender state:
-
-- Base: 12
-- Next sequence number: 12
-- Timeouts: 3
-- Result: Successful
+The RTO therefore changes according to observed network conditions rather than remaining fixed at the initial 2000 ms value.
 
 ## Conclusion
 
-All four experiments completed successfully.
+The Week 5 Go-Back-N implementation successfully combines cumulative acknowledgements, timeout-based retransmission, channel emulation, adaptive RTO, and Karn's algorithm.
 
-The experiments demonstrate that the Go-Back-N implementation can recover from packet loss and ACK loss using cumulative acknowledgements, timeout detection, and retransmission of outstanding packets.
-
-Higher combined loss resulted in more timeout and retransmission activity, while the final transfer remained reliable.
+All tested transfers completed successfully, including packet loss, ACK loss, combined loss, and delayed-channel conditions.

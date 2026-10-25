@@ -1,26 +1,47 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#ifdef _WIN32
+
+#define _WIN32_WINNT 0x0601
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+
+#else
+
 #include <unistd.h>
-#include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "../channel/channel_emulator.h"
+
 #define PORT 6025
 #define PACKET_SIZE 250
 #define ACK_SIZE 250
 
-#define DEFAULT_PACKET_LOSS_PROBABILITY 25
-#define DEFAULT_ACK_LOSS_PROBABILITY 25
+#define DEFAULT_PACKET_LOSS_PROBABILITY 0
+#define DEFAULT_ACK_LOSS_PROBABILITY 0
+#define DEFAULT_CHANNEL_DELAY_MS 0
+#define CHANNEL_SEED 12345
 
 int main(int argc, char *argv[])
 {
     int sockfd;
     struct sockaddr_in sa;
     struct sockaddr_in ca;
+
+#ifdef _WIN32
+    int ca_len;
+#else
     socklen_t ca_len;
+#endif
 
     char packet[PACKET_SIZE];
     char ack[ACK_SIZE];
@@ -37,15 +58,16 @@ int main(int argc, char *argv[])
     /*
      * Optional command-line arguments:
      *
-     * ./receiver_gbn <packet_loss_%> <ack_loss_%>
+     * receiver_gbn <packet_loss_%> <ack_loss_%>
      *
-     * Example:
+     * Examples:
      *
-     * ./receiver_gbn 0 0
-     * ./receiver_gbn 25 0
-     * ./receiver_gbn 0 25
-     * ./receiver_gbn 25 25
+     * receiver_gbn 0 0
+     * receiver_gbn 25 0
+     * receiver_gbn 0 25
+     * receiver_gbn 25 25
      */
+
     if (argc >= 2)
     {
         packet_loss_probability = atoi(argv[1]);
@@ -68,19 +90,38 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+#ifdef _WIN32
+
     /*
-     * Seed random number generator.
+     * Initialize Windows Sockets.
      */
-    srand((unsigned int)time(NULL));
+    WSADATA wsa_data;
+
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0)
+    {
+        printf("WSAStartup failed.\n");
+        return 1;
+    }
+
+#endif
 
     /*
      * Create UDP socket.
      */
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
+#ifdef _WIN32
+    if (sockfd == INVALID_SOCKET)
+#else
     if (sockfd < 0)
+#endif
     {
         perror("socket");
+
+#ifdef _WIN32
+        WSACleanup();
+#endif
+
         return 1;
     }
 
@@ -92,11 +133,18 @@ int main(int argc, char *argv[])
     if (setsockopt(sockfd,
                    SOL_SOCKET,
                    SO_REUSEADDR,
-                   &reuse,
+                   (const char *)&reuse,
                    sizeof(reuse)) < 0)
     {
         perror("setsockopt");
+
+#ifdef _WIN32
+        closesocket(sockfd);
+        WSACleanup();
+#else
         close(sockfd);
+#endif
+
         return 1;
     }
 
@@ -117,9 +165,27 @@ int main(int argc, char *argv[])
              sizeof(sa)) < 0)
     {
         perror("bind");
+
+#ifdef _WIN32
+        closesocket(sockfd);
+        WSACleanup();
+#else
         close(sockfd);
+#endif
+
         return 1;
     }
+
+    /*
+     * Initialize Channel Emulator.
+     */
+    ChannelConfig channel;
+
+    channel_init(&channel,
+                 packet_loss_probability,
+                 ack_loss_probability,
+                 DEFAULT_CHANNEL_DELAY_MS,
+                 CHANNEL_SEED);
 
     /*
      * Startup information.
@@ -128,10 +194,13 @@ int main(int argc, char *argv[])
     printf("      Go-Back-N Receiver Started\n");
     printf("=====================================\n");
     printf("Listening on port: %d\n", PORT);
+    printf("Channel Emulator: ENABLED\n");
     printf("Packet loss probability: %d%%\n",
            packet_loss_probability);
-    printf("ACK loss probability: %d%%\n\n",
+    printf("ACK loss probability: %d%%\n",
            ack_loss_probability);
+    printf("Channel delay: %d ms\n\n",
+           DEFAULT_CHANNEL_DELAY_MS);
 
     /*
      * Receive packets continuously.
@@ -143,6 +212,18 @@ int main(int argc, char *argv[])
 
         ca_len = sizeof(ca);
 
+#ifdef _WIN32
+
+        int received =
+            recvfrom(sockfd,
+                     packet,
+                     sizeof(packet) - 1,
+                     0,
+                     (struct sockaddr *)&ca,
+                     &ca_len);
+
+#else
+
         ssize_t received =
             recvfrom(sockfd,
                      packet,
@@ -150,6 +231,8 @@ int main(int argc, char *argv[])
                      0,
                      (struct sockaddr *)&ca,
                      &ca_len);
+
+#endif
 
         if (received < 0)
         {
@@ -160,6 +243,23 @@ int main(int argc, char *argv[])
         packet[received] = '\0';
 
         printf("Received: %s\n", packet);
+
+        /*
+         * Simulate packet loss using Channel Emulator.
+         */
+        if (channel_should_drop_packet(&channel))
+        {
+            printf("\n*** SIMULATED PACKET LOSS ***\n");
+            printf("Packet discarded by Channel Emulator.\n");
+            printf("No ACK sent.\n\n");
+
+            continue;
+        }
+
+        /*
+         * Apply channel delay to successfully received packet.
+         */
+        channel_delay(&channel);
 
         /*
          * Extract sequence number.
@@ -174,20 +274,6 @@ int main(int argc, char *argv[])
         printf("Packet sequence number: %d\n", seq);
         printf("Expected sequence number: %d\n",
                expected_seq);
-
-        /*
-         * Simulate packet loss.
-         */
-        int packet_loss = rand() % 100;
-
-        if (packet_loss < packet_loss_probability)
-        {
-            printf("\n*** SIMULATED PACKET LOSS ***\n");
-            printf("Packet discarded: %s\n", packet);
-            printf("No ACK sent.\n\n");
-
-            continue;
-        }
 
         /*
          * Correct packet.
@@ -213,18 +299,22 @@ int main(int argc, char *argv[])
                    ack);
 
             /*
-             * Simulate ACK loss.
+             * Simulate ACK loss using Channel Emulator.
              */
-            int ack_loss = rand() % 100;
-
-            if (ack_loss < ack_loss_probability)
+            if (channel_should_drop_ack(&channel))
             {
                 printf("\n*** SIMULATED ACK LOSS ***\n");
-                printf("ACK discarded: %s\n", ack);
+                printf("ACK discarded by Channel Emulator: %s\n",
+                       ack);
                 printf("No ACK sent.\n\n");
 
                 continue;
             }
+
+            /*
+             * Apply channel delay before sending ACK.
+             */
+            channel_delay(&channel);
 
             /*
              * Send ACK.
@@ -233,11 +323,11 @@ int main(int argc, char *argv[])
                    ack);
 
             if (sendto(sockfd,
-                        ack,
-                        strlen(ack),
-                        0,
-                        (struct sockaddr *)&ca,
-                        ca_len) < 0)
+                       ack,
+                       (int)strlen(ack),
+                       0,
+                       (struct sockaddr *)&ca,
+                       ca_len) < 0)
             {
                 perror("sendto");
                 continue;
@@ -270,9 +360,7 @@ int main(int argc, char *argv[])
             /*
              * Simulate loss of duplicate ACK.
              */
-            int ack_loss = rand() % 100;
-
-            if (ack_loss < ack_loss_probability)
+            if (channel_should_drop_ack(&channel))
             {
                 printf("\n*** SIMULATED ACK LOSS ***\n");
                 printf("Duplicate ACK discarded: %s\n",
@@ -283,17 +371,22 @@ int main(int argc, char *argv[])
             }
 
             /*
+             * Apply channel delay before sending ACK.
+             */
+            channel_delay(&channel);
+
+            /*
              * Resend previous cumulative ACK.
              */
             printf("Resending previous ACK: %s\n",
                    ack);
 
             if (sendto(sockfd,
-                        ack,
-                        strlen(ack),
-                        0,
-                        (struct sockaddr *)&ca,
-                        ca_len) < 0)
+                       ack,
+                       (int)strlen(ack),
+                       0,
+                       (struct sockaddr *)&ca,
+                       ca_len) < 0)
             {
                 perror("sendto");
                 continue;
@@ -335,9 +428,7 @@ int main(int argc, char *argv[])
                 /*
                  * Simulate ACK loss.
                  */
-                int ack_loss = rand() % 100;
-
-                if (ack_loss < ack_loss_probability)
+                if (channel_should_drop_ack(&channel))
                 {
                     printf("\n*** SIMULATED ACK LOSS ***\n");
                     printf("ACK discarded: %s\n", ack);
@@ -346,12 +437,17 @@ int main(int argc, char *argv[])
                     continue;
                 }
 
+                /*
+                 * Apply channel delay before ACK.
+                 */
+                channel_delay(&channel);
+
                 if (sendto(sockfd,
-                            ack,
-                            strlen(ack),
-                            0,
-                            (struct sockaddr *)&ca,
-                            ca_len) < 0)
+                           ack,
+                           (int)strlen(ack),
+                           0,
+                           (struct sockaddr *)&ca,
+                           ca_len) < 0)
                 {
                     perror("sendto");
                     continue;
@@ -366,7 +462,12 @@ int main(int argc, char *argv[])
         }
     }
 
+#ifdef _WIN32
+    closesocket(sockfd);
+    WSACleanup();
+#else
     close(sockfd);
+#endif
 
     return 0;
 }
