@@ -98,6 +98,65 @@ else {
     Write-Host "Build build\sender_timeout.exe first if it is missing."
 }
 
+# Test 4: Duplicate-packet behavior.
+Write-Host "`nTest 4: Duplicate-packet behavior"
+
+if ((Test-Path "tests\receiver_duplicate_win.c") -and
+    (Test-Path "build\test_duplicate.exe")) {
+
+    # Compile the duplicate-packet receiver.
+    & gcc tests\receiver_duplicate_win.c -o build\receiver_duplicate_win.exe -lws2_32
+
+    if ($LASTEXITCODE -eq 0) {
+        $receiver = Start-Process `
+            -FilePath (Resolve-Path "build\receiver_duplicate_win.exe").Path `
+            -PassThru `
+            -NoNewWindow `
+            -RedirectStandardOutput "build\duplicate_receiver.log" `
+            -RedirectStandardError "build\duplicate_receiver_error.log"
+
+        try {
+            Start-Sleep -Seconds 1
+
+            $testOutput = & .\build\test_duplicate.exe 2>&1 | Out-String
+            $testExitCode = $LASTEXITCODE
+
+            Start-Sleep -Milliseconds 500
+
+            $receiverOutput = ""
+            if (Test-Path "build\duplicate_receiver.log") {
+                $receiverOutput = Get-Content "build\duplicate_receiver.log" -Raw
+            }
+
+            $duplicatePassed = (
+                $testExitCode -eq 0 -and
+                ([regex]::Matches($testOutput, "PASS: ACK=0 received")).Count -eq 2
+            )
+
+            Record-Result "Original and duplicate packets both receive ACK=0" $duplicatePassed
+
+            if (-not $duplicatePassed) {
+                Write-Host "`nDuplicate test output:" -ForegroundColor Yellow
+                Write-Host $testOutput
+                Write-Host "`nReceiver log:" -ForegroundColor Yellow
+                Write-Host $receiverOutput
+            }
+        }
+        finally {
+            if (-not $receiver.HasExited) {
+                Stop-Process -Id $receiver.Id -Force
+            }
+        }
+    }
+    else {
+        Record-Result "Compile duplicate-packet receiver" $false
+    }
+}
+else {
+    Record-Result "Duplicate-packet test prerequisites exist" $false
+    Write-Host "Check tests\receiver_duplicate_win.c and build\test_duplicate.exe."
+}
+
 Write-Host "`n=== Test Summary ==="
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red
