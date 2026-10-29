@@ -1,0 +1,8 @@
+protocol,test_case,expected_behavior,observed_result,status,evidence_file,notes
+Stop-and-Wait,Normal Transmission,Receiver acknowledges valid data,Hello delivered and ACK=0 observed,Pass,timeout_retransmission_test_results,First transmission succeeded
+Stop-and-Wait,Corrupted Packet,Receiver detects corrupted data,Checksum mismatch detected,Pass,checksum_test_results,Based on captured test output
+Stop-and-Wait,Wrong Checksum,Receiver rejects invalid checksum,Checksum mismatch detected,Pass,checksum_test_results,Based on captured test output
+Stop-and-Wait,Malformed Packet,Receiver rejects invalid packet format,Invalid packet format detected,Pass,checksum_test_results,Based on captured test output
+Stop-and-Wait,Invalid ACK,Sender rejects unexpected acknowledgement,Sender stopped after three attempts,Pass,invalid_ack_duplicate_packet_test_results,Invalid ACK was rejected
+Stop-and-Wait,Duplicate Packet,Receiver detects duplicate and resends ACK,Duplicate detected and ACK=0 resent,Pass,invalid_ack_duplicate_packet_test_results,Duplicate was not treated as new data
+Stop-and-Wait,Timeout and Retransmission,Sender retries when ACK is absent,Sender failed after three attempts,Observed failure,timeout_retransmission_test_results,Receiver was stopped; missing ACK cause was not isolated
