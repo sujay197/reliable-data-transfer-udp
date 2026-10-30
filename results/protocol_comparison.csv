@@ -1,0 +1,10 @@
+Protocol,Test_Type,Packet_Loss_Percent,ACK_Loss_Percent,Delay_ms,Total_Packets,Retransmissions,Timeouts,Initial_RTO_ms,Final_RTO_ms,In_Order_Delivery,Transfer_Completed
+Stop-and-Wait,No Loss,0,0,0,4,0,0,2000,3749.34,Yes,Yes
+Stop-and-Wait,Packet Loss,30,0,0,4,Yes,3,2000,5307.76,Yes,Yes
+Stop-and-Wait,ACK Loss,0,30,0,4,Yes,3,2000,5307.72,Yes,Yes
+Go-Back-N,No Loss,0,0,0,12,0,0,2000,3359.64,Yes,Yes
+Go-Back-N,Packet Loss,30,0,0,12,Yes,Multiple,2000,4765.62,Yes,Yes
+Go-Back-N,ACK Loss,0,30,0,12,Yes,Yes,2000,5032.69,Yes,Yes
+Selective Repeat,No Loss,0,0,0,10,1,0,2000,4225.40,Yes,Yes
+Selective Repeat,Packet Loss,30,0,0,10,Yes,Yes,2000,5052.19,Yes,Yes
+Selective Repeat,ACK Loss,0,30,0,10,Yes,Yes,2000,5299.35,Yes,Yes
