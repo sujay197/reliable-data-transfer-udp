@@ -77,7 +77,6 @@ reliable-data-transfer-udp/
 │   └── rto/
 ├── tests/
 ├── build/
-├── data/
 ├── docs/
 ├── experiments/
 ├── results/
