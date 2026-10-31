@@ -1,143 +1,227 @@
+
+
 # Reliable Data Transfer over UDP
 
-A socket-level reliable data transfer system implemented over UDP.
+A socket-level reliable data transfer system implemented in C using UDP. This project demonstrates and compares three reliable data transfer protocols: Stop-and-Wait ARQ, Go-Back-N ARQ, and Selective Repeat ARQ.
 
-## Protocols
+## Project Objectives
 
-- Stop-and-Wait ARQ
-- Go-Back-N ARQ
-- Selective Repeat ARQ
+- Implement reliable data transmission over UDP.
+- Demonstrate packet sequencing and acknowledgement mechanisms.
+- Detect corrupted packets using checksums.
+- Handle packet loss and acknowledgement loss through retransmission.
+- Implement adaptive Retransmission Timeout (RTO) estimation.
+- Apply Karn's algorithm to avoid inaccurate RTT measurements.
+- Simulate network impairments using a channel emulator.
+- Compare the behavior of different ARQ protocols experimentally.
+
+## Protocols Implemented
+
+### 1. Stop-and-Wait ARQ
+
+- Transmits one packet at a time.
+- Waits for the corresponding acknowledgement.
+- Uses sequence numbers and checksums.
+- Supports timeout-based retransmission.
+- Detects duplicate packets and resends acknowledgements.
+
+### 2. Go-Back-N ARQ
+
+- Uses a sliding window with a configured window size of 4.
+- Supports cumulative acknowledgements.
+- Retransmits outstanding packets after timeout.
+- Uses adaptive RTO and Karn's algorithm.
+
+### 3. Selective Repeat ARQ
+
+- Uses a sliding window with a configured window size of 4.
+- Supports individual packet acknowledgements.
+- Retransmits only packets whose acknowledgements are missing.
+- Buffers out-of-order packets at the receiver.
+- Delivers received data to the application in order.
 
 ## Features
 
-- Sequence numbers
-- Acknowledgements
-- Checksums
-- Retransmission
-- Adaptive retransmission timeout (RTO)
+- UDP socket communication
+- Sequence numbers and acknowledgements
+- Checksum-based error detection
+- Timeout-based retransmission
 - RTT measurement
+- Adaptive retransmission timeout (RTO)
 - Karn's algorithm
 - Channel emulation
-- Packet loss simulation
-- ACK loss simulation
+- Packet loss and ACK loss simulation
 - Configurable channel delay
-- File integrity verification
 - Selective Repeat receiver buffering
-- In-order delivery
+- In-order data delivery
+- Automated integration tests
+
+## Technologies Used
+
+- C
+- UDP sockets
+- Winsock2 (Windows)
+- GCC / MinGW
+- PowerShell
+- Git and GitHub
 
 ## Project Structure
 
-- `src/` — Protocol implementations
-- `build/` — Compiled executables
-- `data/` — Input and output data
-- `docs/` — Project documentation
-- `experiments/` — Experiment procedures and observations
-- `results/` — Experiment results in CSV format
-- `tests/` — Test files
+```text
+reliable-data-transfer-udp/
+├── src/
+│   ├── stop_and_wait/
+│   ├── go_back_n/
+│   ├── selective_repeat/
+│   ├── channel/
+│   └── rto/
+├── tests/
+├── build/
+├── data/
+├── docs/
+├── experiments/
+├── results/
+├── graphs/
+├── README.md
+├── AI-USE.md
+└── generate_graphs.ps1
+```
 
-## Week 5 Enhancements
+## Prerequisites
 
-Week 5 integrates adaptive retransmission timeout estimation and channel emulation into all three reliable UDP protocols.
+- Windows operating system
+- GCC compiler (MinGW-w64 recommended)
+- Git
+- PowerShell
+- Visual Studio Code (recommended)
 
-### Adaptive RTO
+Verify GCC installation:
 
-The sender measures valid RTT samples and updates:
+```powershell
+gcc --version
+```
 
-- Smoothed RTT
-- RTT deviation
+## Getting Started
+
+Clone the repository:
+
+```powershell
+git clone https://github.com/sujay197/reliable-data-transfer-udp.git
+cd reliable-data-transfer-udp
+```
+
+Ensure the `build` directory exists before compiling:
+
+```powershell
+New-Item -ItemType Directory -Force build
+```
+
+Compile the protocol programs using GCC and the Winsock library.
+
+### Stop-and-Wait
+
+```powershell
+gcc src\stop_and_wait\receiver_timeout.c src\channel\channel_emulator.c -o build\receiver_timeout.exe -lws2_32
+
+gcc src\stop_and_wait\sender_timeout.c src\rto\rto.c src\channel\channel_emulator.c -o build\sender_timeout.exe -lws2_32
+```
+
+### Go-Back-N
+
+```powershell
+gcc src\go_back_n\receiver_gbn.c src\channel\channel_emulator.c -o build\receiver_gbn.exe -lws2_32
+
+gcc src\go_back_n\sender_gbn.c src\rto\rto.c src\channel\channel_emulator.c -o build\sender_gbn.exe -lws2_32
+```
+
+### Selective Repeat
+
+```powershell
+gcc src\selective_repeat\receiver_sr.c src\channel\channel_emulator.c -o build\receiver_sr.exe -lws2_32
+
+gcc src\selective_repeat\sender_sr.c src\rto\rto.c src\channel\channel_emulator.c -o build\sender_sr.exe -lws2_32
+```
+
+> Run the receiver before starting its corresponding sender. Use separate terminals for the sender and receiver.
+
+## Testing
+
+The project contains automated tests for packet validation and protocol behavior.
+
+Run the automated test suite using PowerShell:
+
+```powershell
+.\tests\run_tests.ps1
+```
+
+The test suite compiles and executes the available integration tests, including invalid-ACK and duplicate-packet behavior.
+
+## Experiments and Results
+
+Experiment procedures and observations are documented in the `experiments/` directory.
+
+| File | Description |
+|---|---|
+| `experiments/stop_and_wait_experiment.md` | Stop-and-Wait validation experiments |
+| `experiments/gbn_experiment.md` | Go-Back-N experiments |
+| `experiments/sr_experiment.md` | Selective Repeat experiments |
+| `experiments/protocol_comparison.md` | Comparative protocol analysis |
+
+Measured results are stored in CSV format in `results/`.
+
+Important files:
+
+- `results/stop_and_wait_results.csv`
+- `results/gbn_results.csv`
+- `results/sr_results.csv`
+- `results/week5_results.csv`
+- `results/protocol_comparison.csv`
+
+## Graphs and Analysis
+
+Generated graphs are stored in `graphs/`.
+
+- `graphs/final_rto_comparison.svg`
+- `graphs/packet_count_comparison.svg`
+
+The graph generation script is:
+
+```powershell
+.\generate_graphs.ps1
+```
+
+The comparison report discusses reliability, retransmission behavior, timeout observations, and RTO measurements based on recorded experiments.
+
+## Adaptive RTO and Channel Emulation
+
+The adaptive RTO estimator maintains:
+
+- Smoothed RTT (SRTT)
+- RTT deviation (RTTVAR)
 - Retransmission timeout (RTO)
 
-The initial RTO is `2000 ms`. RTO values are bounded to prevent excessively small or large timeout values.
+The initial RTO used in the documented experiments is `2000 ms`. RTO values are bounded to avoid excessively small or large timeouts.
 
-Karn's algorithm is used so that retransmitted packets are not used for RTT estimation.
+Karn's algorithm excludes retransmitted packets from RTT estimation.
 
-### Channel Emulator
+The channel emulator supports controlled packet loss, ACK loss, configurable delay, and reproducible random seeds.
 
-The channel emulator supports:
+## Documentation
 
-- Packet loss
-- ACK loss
-- Configurable delay
-- Reproducible random seeds
+Additional project documentation is maintained in:
 
-This allows the reliability mechanisms of each protocol to be tested under controlled network conditions.
+- `experiments/` — experiment procedures and observations
+- `results/` — experimental measurements in CSV format
+- `graphs/` — generated comparison graphs
+- `docs/` — final report and demonstration instructions
 
-## Stop-and-Wait ARQ
-
-The Stop-and-Wait implementation uses adaptive RTO, RTT measurement, Karn's algorithm, retransmission, checksums, and channel emulation.
-
-Week 5 testing covered:
-
-- No packet or ACK loss
-- 30% packet loss
-- 30% ACK loss
-- Retransmission and timeout behavior
-- Adaptive RTO updates
-
-## Go-Back-N ARQ Experiment
-
-The Go-Back-N implementation uses UDP port `6025`, a window size of `4`, and `12` packets.
-
-The sender uses cumulative acknowledgements and retransmits outstanding packets after timeout. Adaptive RTO and Karn's algorithm are integrated with the retransmission mechanism.
-
-Week 5 testing covered:
-
-- No loss
-- 30% packet loss
-- 30% ACK loss
-- Combined packet/ACK loss
-- Channel delay
-- Adaptive RTO
-
-See [`experiments/gbn_experiment.md`](experiments/gbn_experiment.md) for the experiment procedure and observations.
-
-## Selective Repeat ARQ Experiment
-
-The Selective Repeat implementation uses UDP port `6026`, a window size of `4`, and `10` packets.
-
-The receiver supports individual acknowledgements and buffering of out-of-order packets. The sender retransmits only packets whose acknowledgements are missing.
-
-The receiver deliberately drops the first copy of packet `2` during the standard Selective Repeat experiment.
-
-Week 5 testing covered:
-
-- No loss
-- 30% packet loss
-- 30% ACK loss
-- Adaptive RTO under 500 ms receiver-side delay
-- Retransmissions under delay
-- In-order delivery with out-of-order buffering
-
-See [`experiments/sr_experiment.md`](experiments/sr_experiment.md) for the experiment procedure and observations.
-
-## Week 5 Results
-
-Detailed Week 5 measurements are recorded in:
-
-- [`results/week5_results.csv`](results/week5_results.csv)
-
-The results include packet loss, ACK loss, delay, retransmissions, timeouts, initial RTO, final RTO, in-order delivery, and transfer completion.
-
-All recorded Week 5 protocol tests completed successfully.
-
-## Building and Running
-
-Build and execution commands depend on the protocol implementation and your environment. Refer to the source files and experiment documentation for the applicable instructions.
-
-For MinGW/Windows, the protocol executables can be built with commands such as:
-
-    gcc src\stop_and_wait\receiver_timeout.c src\channel\channel_emulator.c -o build\receiver_timeout.exe -lws2_32
-    gcc src\stop_and_wait\sender_timeout.c src\rto\rto.c src\channel\channel_emulator.c -o build\sender_timeout.exe -lws2_32
-
-    gcc src\go_back_n\receiver_gbn.c src\channel\channel_emulator.c -o build\receiver_gbn.exe -lws2_32
-    gcc src\go_back_n\sender_gbn.c src\rto\rto.c src\channel\channel_emulator.c -o build\sender_gbn.exe -lws2_32
-
-    gcc src\selective_repeat\receiver_sr.c src\channel\channel_emulator.c -o build\receiver_sr.exe -lws2_32
-    gcc src\selective_repeat\sender_sr.c src\rto\rto.c src\channel\channel_emulator.c -o build\sender_sr.exe -lws2_32
-
-## Team
+## Team Members
 
 - Sujay Pandit
 - Archit Ishwar
 - Abhishek Behera
 - Suryansh Paul
+
+## AI Usage
+
+Refer to [`AI-USE.md`](AI-USE.md) for documentation of AI-assisted activities during the project.
